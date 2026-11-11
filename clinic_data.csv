@@ -1,0 +1,7 @@
+P,General,1,Ada Obi,25,0803111111,
+A,1,1,2026-11-02,09:30,Checkup,Pending
+P,Emergency,2,Tunde Bello,40,0805222222,4
+P,Follow-Up,3,Chioma Eze,30,0807333333,Malaria
+A,3,2,2026-11-03,10:00,Review,Pending
+Q,1
+Q,3
