@@ -13,6 +13,8 @@
 #include "../controller/ReportGenerator.h"
 #include "../utils/FileHandler.h"
 #include "PatientPanel.h"
+#include "AppointmentPanel.h"
+#include "QueuePanel.h"
 
 namespace clinic {
 namespace gui {
@@ -42,11 +44,14 @@ public:
         g->resizable(dashboard);
         g->end();
 
-        new PatientPanel(0, 50, w(), h() - 75, m, [this](const std::string& s) { setStatus(s); refresh(); });
-        placeholder("Appointments",    "Appointments tab - coming in Step C");
-        placeholder("Waiting Queue",   "Waiting Queue tab - coming in Step C");
-        placeholder("Search && Sort",   "Search & Sort tab - coming in Step D");
-        placeholder("Reports",         "Reports tab - coming in Step D");
+        // Every panel calls this when it changes data, so all tabs stay in sync
+        auto notifyFn = [this](const std::string& s) { setStatus(s); refreshAll(); };
+        patientPanel = new PatientPanel(0, 50, w(), h() - 75, m, notifyFn);
+        apptPanel    = new AppointmentPanel(0, 50, w(), h() - 75, m, notifyFn);
+        queuePanel   = new QueuePanel(0, 50, w(), h() - 75, m, notifyFn);
+
+        placeholder("Search && Sort", "Search && Sort tab - coming in Step D");
+        placeholder("Reports",        "Reports tab - coming in Step D");
         tabs->end();
 
         // ---- Status bar ----
@@ -55,9 +60,9 @@ public:
         status->align(FL_ALIGN_INSIDE | FL_ALIGN_LEFT);
 
         end();
-        resizable(tabs);          // tabs grow/shrink when the window is resized
+        resizable(tabs);
         size_range(700, 450);
-        callback(exitCb, this);   // closing the window (X button or Esc) asks first
+        callback(exitCb, this);
 
         refresh();
         Fl::add_timeout(5.0, timerCb, this);   // timer event
@@ -65,7 +70,6 @@ public:
 
     ~MainWindow() { Fl::remove_timeout(timerCb, this); }
 
-    // Rebuilds the dashboard text from the current data
     void refresh() {
         std::string t = "CLINIC DASHBOARD\n\n";
         t += "Total patients: " + std::to_string(m.database().size()) + "\n";
@@ -76,6 +80,14 @@ public:
         dashboard->redraw();
     }
 
+    // Refreshes the dashboard and every tab
+    void refreshAll() {
+        refresh();
+        if (patientPanel) patientPanel->refresh();
+        if (apptPanel)    apptPanel->refresh();
+        if (queuePanel)   queuePanel->refresh();
+    }
+
     void setStatus(const std::string& s) { status->copy_label(s.c_str()); }
 
 private:
@@ -84,6 +96,9 @@ private:
     Fl_Tabs* tabs;
     Fl_Box* dashboard;
     Fl_Box* status;
+    PatientPanel* patientPanel = nullptr;
+    AppointmentPanel* apptPanel = nullptr;
+    QueuePanel* queuePanel = nullptr;
 
     void placeholder(const char* tabName, const char* text) {
         Fl_Group* g = new Fl_Group(0, 50, w(), h() - 75, tabName);
@@ -97,61 +112,77 @@ private:
 
     // ---- Event handlers (callbacks) ----
     static void timerCb(void* d) {
-        MainWindow* w = self(d);
-        w->refresh();
-        char buf[16];
+        MainWindow* win = self(d);
+        win->refresh();
+
         std::time_t now = std::time(nullptr);
-        std::strftime(buf, sizeof buf, "%H:%M:%S", std::localtime(&now));
-        w->setStatus(std::string("Dashboard refreshed at ") + buf);
+        char clock[16], day[16];
+        std::strftime(clock, sizeof clock, "%H:%M:%S", std::localtime(&now));
+        std::strftime(day, sizeof day, "%Y-%m-%d", std::localtime(&now));
+
+        // Appointment reminder: pending appointments dated today
+        int dueToday = 0;
+        for (const PatientRecord* p : win->m.database().getAll())
+            for (const Appointment& a : p->getAppointments())
+                if (a.getStatus() == AppointmentStatus::Pending && a.getDate() == day)
+                    dueToday++;
+
+        std::string s = std::string("Dashboard refreshed at ") + clock;
+        if (dueToday > 0)
+            s += "  |  REMINDER: " + std::to_string(dueToday) + " appointment(s) pending today";
+        if (win->m.waitingCount() >= 3)   // waiting-patients alert
+            s += "  |  ALERT: " + std::to_string(win->m.waitingCount()) + " patients waiting";
+        win->setStatus(s);
+
         Fl::repeat_timeout(5.0, timerCb, d);
     }
 
     static void newCb(Fl_Widget*, void* d) {
-        MainWindow* w = self(d);
+        MainWindow* win = self(d);
         if (fl_choice("Clear all patients and appointments?", "Cancel", "Clear", 0) == 1) {
-            w->m.resetAll();
-            w->refresh();
-            w->setStatus("Started a new empty clinic.");
+            win->m.resetAll();
+            win->refreshAll();
+            win->setStatus("Started a new empty clinic.");
         }
     }
 
     static void saveCb(Fl_Widget*, void* d) {
-        MainWindow* w = self(d);
+        MainWindow* win = self(d);
         Fl_Native_File_Chooser fc;
         fc.title("Save clinic data");
         fc.type(Fl_Native_File_Chooser::BROWSE_SAVE_FILE);
         fc.filter("CSV Files\t*.csv");
         fc.options(Fl_Native_File_Chooser::SAVEAS_CONFIRM);
-        if (fc.show() != 0) return;                       // user cancelled
+        if (fc.show() != 0) return;
         std::string path = fc.filename();
         if (path.size() < 4 || path.substr(path.size() - 4) != ".csv") path += ".csv";
         try {
-            FileHandler::save(w->m, path);
-            w->setStatus("Saved to " + path);
+            FileHandler::save(win->m, path);
+            win->setStatus("Saved to " + path);
         } catch (const std::exception& e) {
             fl_alert("Error: %s", e.what());
         }
     }
 
     static void loadCb(Fl_Widget*, void* d) {
-        MainWindow* w = self(d);
+        MainWindow* win = self(d);
         Fl_Native_File_Chooser fc;
         fc.title("Load clinic data");
         fc.type(Fl_Native_File_Chooser::BROWSE_FILE);
         fc.filter("CSV Files\t*.csv");
         if (fc.show() != 0) return;
         try {
-            FileHandler::load(w->m, fc.filename());
-            w->refresh();
-            w->setStatus(std::string("Loaded ") + fc.filename());
+            FileHandler::load(win->m, fc.filename());
+            win->refreshAll();
+            win->setStatus(std::string("Loaded ") + fc.filename());
         } catch (const std::exception& e) {
             fl_alert("Error: %s", e.what());
         }
     }
 
     static void exitCb(Fl_Widget*, void* d) {
-        MainWindow* w = self(d);
-        if (fl_choice("Exit SCAPMS?", "Cancel", "Exit", 0) == 1) w->hide();
+        MainWindow* win = self(d);
+        if (fl_choice("Exit SCAPMS?", "Cancel", "Exit", 0) == 1) win->hide();
     }
 
     static void aboutCb(Fl_Widget*, void*) {
