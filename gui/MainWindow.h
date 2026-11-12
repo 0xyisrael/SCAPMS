@@ -15,6 +15,8 @@
 #include "PatientPanel.h"
 #include "AppointmentPanel.h"
 #include "QueuePanel.h"
+#include "SearchSortPanel.h"
+#include "ReportPanel.h"
 
 namespace clinic {
 namespace gui {
@@ -31,6 +33,7 @@ public:
         menu->add("&File/&Save", FL_CTRL + 's', saveCb,  this);
         menu->add("&File/&Load", FL_CTRL + 'o', loadCb,  this);
         menu->add("&File/E&xit", FL_CTRL + 'q', exitCb,  this);
+        menu->add("&Search/&Find Patient", FL_CTRL + 'f', findCb, this);
         menu->add("&Help/&About", 0,            aboutCb, this);
 
         // ---- Tabs ----
@@ -49,9 +52,8 @@ public:
         patientPanel = new PatientPanel(0, 50, w(), h() - 75, m, notifyFn);
         apptPanel    = new AppointmentPanel(0, 50, w(), h() - 75, m, notifyFn);
         queuePanel   = new QueuePanel(0, 50, w(), h() - 75, m, notifyFn);
-
-        placeholder("Search && Sort", "Search && Sort tab - coming in Step D");
-        placeholder("Reports",        "Reports tab - coming in Step D");
+        searchPanel  = new SearchSortPanel(0, 50, w(), h() - 75, m, notifyFn);
+        reportPanel  = new ReportPanel(0, 50, w(), h() - 75, m);
         tabs->end();
 
         // ---- Status bar ----
@@ -86,6 +88,8 @@ public:
         if (patientPanel) patientPanel->refresh();
         if (apptPanel)    apptPanel->refresh();
         if (queuePanel)   queuePanel->refresh();
+        if (searchPanel)  searchPanel->refresh();
+        if (reportPanel)  reportPanel->refresh();
     }
 
     void setStatus(const std::string& s) { status->copy_label(s.c_str()); }
@@ -99,14 +103,8 @@ private:
     PatientPanel* patientPanel = nullptr;
     AppointmentPanel* apptPanel = nullptr;
     QueuePanel* queuePanel = nullptr;
-
-    void placeholder(const char* tabName, const char* text) {
-        Fl_Group* g = new Fl_Group(0, 50, w(), h() - 75, tabName);
-        Fl_Box* b = new Fl_Box(20, 60, w() - 40, h() - 95, text);
-        b->labelsize(16);
-        g->resizable(b);
-        g->end();
-    }
+    SearchSortPanel* searchPanel = nullptr;
+    ReportPanel* reportPanel = nullptr;
 
     static MainWindow* self(void* d) { return static_cast<MainWindow*>(d); }
 
@@ -135,6 +133,13 @@ private:
         win->setStatus(s);
 
         Fl::repeat_timeout(5.0, timerCb, d);
+    }
+
+    static void findCb(Fl_Widget*, void* d) {      // Ctrl+F: jump to the search tab
+        MainWindow* win = self(d);
+        win->tabs->value(win->searchPanel);
+        win->tabs->redraw();
+        win->searchPanel->focusKeyword();
     }
 
     static void newCb(Fl_Widget*, void* d) {
